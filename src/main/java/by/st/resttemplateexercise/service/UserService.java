@@ -20,11 +20,9 @@ import java.util.Map;
 public class UserService {
 
     private final String URL = "http://94.198.50.185:7081/api/users";
-
     private final RestTemplate restTemplate;
     private final Password password;
     private final SessionId sessionId;
-
 
     @Autowired
     public UserService(RestTemplate restTemplate, Password password, SessionId sessionId) {
@@ -33,13 +31,13 @@ public class UserService {
         this.sessionId = sessionId;
     }
 
-    public  void setSessionIdFromResponseHeaders(Map<String, List<String>> headers) {
+    public void setSessionIdFromResponseHeaders(Map<String, List<String>> headers) {
         for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
-            if ("Set-Cookie".equalsIgnoreCase(entry.getKey())) {
+            if ("Cookie".equalsIgnoreCase(entry.getKey())) {
                 for (String cookie : entry.getValue()) {
                     if (cookie.startsWith("JSESSIONID")) {
                         sessionId.setSessionId(cookie.split(";")[0]);
-                        log.info("Session ID setSessionIdFromResponseHeaders: " + this.sessionId);
+                        log.info("Session ID setSessionIdFromResponseHeaders: {}", this.sessionId);
                         break;
                     }
                 }
@@ -47,9 +45,9 @@ public class UserService {
         }
     }
 
-    public  String extractPart(String responseBody) {
+    public String extractPart(String responseBody) {
         String[] parts = responseBody.split(":");
-        log.info(responseBody + " responseBody");
+        log.info("{} responseBody", responseBody);
         if (parts.length > 0) {
             return parts[0].trim();
         } else {
@@ -63,48 +61,57 @@ public class UserService {
         User[] users = responseEntity.getBody();
         HttpHeaders responseHeaders = responseEntity.getHeaders();
         setSessionIdFromResponseHeaders(responseHeaders);
-        log.info("Session ID: " + sessionId.getSessionId());
+        log.info("Session ID: {}", sessionId.getSessionId());
         return List.of(users);
     }
 
     public String createUser(User user) {
-        HttpHeaders headers = new HttpHeaders();
-        if (sessionId.getSessionId() != null) {
-            headers.add("Cookie", "JSESSIONID=" + sessionId.getSessionId());
-        }
-        HttpEntity<User> request = new HttpEntity<>(user, headers);
+        HttpEntity<User> request = getUserHttpEntity(user);
         ResponseEntity<String> response = restTemplate.postForEntity(URL, request, String.class);
         String responseBody = response.getBody();
-        log.info(responseBody);
         password.setFirstPart(extractPart(responseBody));
-        log.info("{}firstPart", password.getFirstPart());
+        log.info("{} firstPart", password.getFirstPart());
         return password.getFirstPart();
     }
 
     public String updateUser(User user) {
+        HttpEntity<User> request = getUserHttpEntity(user);
+        /*ResponseEntity<String> response = restTemplate.exchange(URL, HttpMethod.PUT, request, String.class);*/
+        ResponseEntity<String> response = restTemplate.postForEntity(URL, request, String.class);
+        String responseBody = response.getBody();
+        password.setSecondPart(responseBody);
+        log.info("{} secondPart", password.getSecondPart());
+        return password.getSecondPart();
+    }
+
+    public String deleteUser(Long id) {
+        HttpHeaders headers = new HttpHeaders();
+        if (sessionId.getSessionId() != null) {
+            headers.add("Cookie", "JSESSIONID=" + sessionId.getSessionId());
+        }
+        headers.add("Content-Type", "application/json");
+        headers.setAccessControlRequestMethod(HttpMethod.DELETE);
+
+        HttpEntity<String> request = new HttpEntity<>(headers);
+        ResponseEntity<String> response = restTemplate.exchange(URL + "/" + id,HttpMethod.DELETE,request,String.class);
+        log.info(response.toString());
+        String responseBody = response.getBody();
+        password.setThirdPart(responseBody);
+        log.info("{} thirdPart", password.getThirdPart());
+        Password completePassword = new Password();
+        completePassword.setFirstPart(password.getFirstPart());
+        completePassword.setSecondPart(password.getSecondPart());
+        completePassword.setThirdPart(password.getThirdPart());
+        return completePassword.getFirstPart() + completePassword.getSecondPart() + completePassword.getThirdPart();
+    }
+
+    private HttpEntity<User> getUserHttpEntity(User user) {
         HttpHeaders headers = new HttpHeaders();
         if (sessionId.getSessionId() != null) {
             headers.add("Cookie", "JSESSIONID=" + sessionId.getSessionId());
         }
         headers.setContentType(MediaType.APPLICATION_JSON);
-        HttpEntity<User> request = new HttpEntity<>(user, headers);
-        ResponseEntity<String> response = restTemplate.exchange(URL, HttpMethod.PUT, request, String.class);
-        if (response.getStatusCode() == HttpStatus.OK) {
-            String updatedUser = response.getBody();
-            String secondPart = extractPart(updatedUser); // Извлекаем вторую часть кода
-            log.info("Second part of code: {}", secondPart);
-            return secondPart;
-        } else {
-            log.error("Error updating user: {}", response.getBody());
-            return null;
-        }
-    }
-
-
-
-    public void deleteUser(Long id) {
-        RequestEntity<?> requestEntity = createRequestEntity(URL + id, HttpMethod.DELETE);
-        restTemplate.exchange(requestEntity, Void.class);
+        return new HttpEntity<>(user, headers);
     }
 
     private RequestEntity<?> createRequestEntity(String url, HttpMethod method) {
